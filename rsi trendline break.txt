@@ -1,0 +1,128 @@
+//@version=5
+indicator("RSI + Trendlines with Breaks", overlay=false)
+
+//-----------------------------------------------------
+// ORIGINAL RSI
+//-----------------------------------------------------
+rsiLengthInput = input.int(14, minval=1, title="RSI Length")
+rsiSourceInput = input.source(close, "Source")
+
+change = ta.change(rsiSourceInput)
+up = ta.rma(math.max(change, 0), rsiLengthInput)
+down = ta.rma(-math.min(change, 0), rsiLengthInput)
+
+rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+
+rsiPlot = plot(rsi, "RSI", color=#7E57C2)
+
+hline(70)
+hline(50)
+hline(30)
+
+//-----------------------------------------------------
+// ORIGINAL RSI SMOOTHING
+//-----------------------------------------------------
+maTypeInput = input.string("SMA", "MA Type", options=["None","SMA","EMA","SMMA (RMA)","WMA","VWMA"])
+maLengthInput = input.int(14, "MA Length")
+
+ma(source, length, MAtype) =>
+    switch MAtype
+        "SMA" => ta.sma(source, length)
+        "EMA" => ta.ema(source, length)
+        "SMMA (RMA)" => ta.rma(source, length)
+        "WMA" => ta.wma(source, length)
+        "VWMA" => ta.vwma(source, length)
+
+smoothingMA = maTypeInput != "None" ? ma(rsi, maLengthInput, maTypeInput) : na
+plot(smoothingMA, "RSI MA", color=color.yellow)
+
+//-----------------------------------------------------
+// LUXALGO TRENDLINE SETTINGS
+//-----------------------------------------------------
+length = input.int(14, 'Swing Detection Lookback')
+mult = input.float(1., 'Slope', step=.1)
+calcMethod = input.string('Atr', 'Slope Calculation Method', options=['Atr','Stdev','Linreg'])
+backpaint = input(true)
+
+upCss = input.color(color.teal, 'Up Trendline Color')
+dnCss = input.color(color.red, 'Down Trendline Color')
+showExt = input(true)
+
+//-----------------------------------------------------
+// LUXALGO CALCULATIONS (SOURCE = RSI)
+//-----------------------------------------------------
+var upper = 0.
+var lower = 0.
+var slope_ph = 0.
+var slope_pl = 0.
+
+var offset = backpaint ? length : 0
+
+n = bar_index
+src = rsi
+
+ph = ta.pivothigh(src, length, length)
+pl = ta.pivotlow(src, length, length)
+
+// slope
+slope = switch calcMethod
+    'Atr' => ta.atr(length) / length * mult
+    'Stdev' => ta.stdev(src,length) / length * mult
+    'Linreg' => math.abs(ta.sma(src * n, length) - ta.sma(src, length) * ta.sma(n, length)) / ta.variance(n, length) / 2 * mult
+
+slope_ph := ph ? slope : slope_ph
+slope_pl := pl ? slope : slope_pl
+
+upper := ph ? ph : upper - slope_ph
+lower := pl ? pl : lower + slope_pl
+
+var upos = 0
+var dnos = 0
+
+upos := ph ? 0 : src > upper - slope_ph * length ? 1 : upos
+dnos := pl ? 0 : src < lower + slope_pl * length ? 1 : dnos
+
+//-----------------------------------------------------
+// EXTENDED LINES
+//-----------------------------------------------------
+var uptl = line.new(na,na,na,na, color=upCss, style=line.style_dashed, extend=extend.right)
+var dntl = line.new(na,na,na,na, color=dnCss, style=line.style_dashed, extend=extend.right)
+
+if ph and showExt
+    line.set_xy1(uptl, n-offset, backpaint ? ph : upper - slope_ph * length)
+    line.set_xy2(uptl, n-offset+1, backpaint ? ph - slope : upper - slope_ph * (length+1))
+
+if pl and showExt
+    line.set_xy1(dntl, n-offset, backpaint ? pl : lower + slope_pl * length)
+    line.set_xy2(dntl, n-offset+1, backpaint ? pl + slope : lower + slope_pl * (length+1))
+
+//-----------------------------------------------------
+// TRENDLINE PLOTS
+//-----------------------------------------------------
+plot(backpaint ? upper : upper - slope_ph * length, 'Upper', color = ph ? na : upCss, offset = -offset)
+plot(backpaint ? lower : lower + slope_pl * length, 'Lower', color = pl ? na : dnCss, offset = -offset)
+
+//-----------------------------------------------------
+// BREAKOUT SIGNALS
+//-----------------------------------------------------
+plotshape(upos > upos[1] ? rsi : na,
+     title="Upper Break",
+     style=shape.labelup,
+     location=location.absolute,
+     color=upCss,
+     text="B",
+     textcolor=color.white,
+     size=size.tiny)
+
+plotshape(dnos > dnos[1] ? rsi : na,
+     title="Lower Break",
+     style=shape.labeldown,
+     location=location.absolute,
+     color=dnCss,
+     text="B",
+     textcolor=color.white,
+     size=size.tiny)
+
+//-----------------------------------------------------
+alertcondition(upos > upos[1], 'RSI Trendline Breakout')
+alertcondition(dnos > dnos[1], 'RSI Trendline Breakdown')
